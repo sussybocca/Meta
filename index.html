@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebContainer IDE</title>
+  <style>
+    html, body, #root { margin:0; padding:0; height:100%; width:100%; font-family:sans-serif; }
+    #sidebar { width:200px; border-right:1px solid gray; padding:5px; box-sizing:border-box; }
+    #editor-preview { flex:1; display:flex; flex-direction:column; }
+    button { cursor:pointer; margin-left:4px; margin-top:2px; }
+    ul { list-style:none; padding:0; }
+    li { margin-bottom:4px; }
+    iframe { flex:1; border-top:1px solid gray; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- React and ReactDOM UMD -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+
+  <!-- Monaco Editor UMD -->
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.43.0/min/vs/loader.js"></script>
+
+  <!-- WebContainer UMD -->
+  <script src="https://cdn.jsdelivr.net/npm/@webcontainer/api@0.10.0/dist/index.umd.js"></script>
+
+  <script>
+    const { useState, useEffect } = React;
+    const { WebContainer } = window;
+
+    let files = {}; // flat virtual file system
+
+    function App() {
+      const [currentFile, setCurrentFile] = useState(null);
+      const [wc, setWc] = useState(null);
+      const [previewUrl, setPreviewUrl] = useState("");
+      const [editorInstance, setEditorInstance] = useState(null);
+
+      const startContainer = async () => {
+        const webcontainer = await WebContainer.boot();
+        setWc(webcontainer);
+        const url = await webcontainer.url;
+        setPreviewUrl(url + "/");
+        alert("WebContainer started! You can now create your project files in the editor.");
+      };
+
+      const createFile = () => {
+        const name = prompt("File name:");
+        if (!name) return;
+        files[name] = "";
+        setCurrentFile(name);
+        if (wc) wc.fs.writeFile("/" + name, "");
+        forceUpdate();
+      };
+
+      const deleteFile = (name) => {
+        delete files[name];
+        if (currentFile === name) setCurrentFile(Object.keys(files)[0] || null);
+        if (wc) wc.fs.rm("/" + name);
+        forceUpdate();
+      };
+
+      const renameFile = (oldName) => {
+        const newName = prompt("New name for " + oldName);
+        if (!newName) return;
+        files[newName] = files[oldName];
+        delete files[oldName];
+        if (currentFile === oldName) setCurrentFile(newName);
+        if (wc) wc.fs.rename("/" + oldName, "/" + newName);
+        forceUpdate();
+      };
+
+      const updateFile = (value) => {
+        if (!currentFile) return;
+        files[currentFile] = value;
+        if (wc) wc.fs.writeFile("/" + currentFile, value);
+      };
+
+      const [, setTick] = useState(0);
+      const forceUpdate = () => setTick(t => t + 1);
+
+      useEffect(() => {
+        require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.43.0/min/vs' }});
+        require(["vs/editor/editor.main"], function () {
+          const editor = monaco.editor.create(document.getElementById('editor'), {
+            value: currentFile ? files[currentFile] : "",
+            language: "javascript",
+            theme: "vs-dark"
+          });
+          editor.onDidChangeModelContent(() => updateFile(editor.getValue()));
+          setEditorInstance(editor);
+        });
+      }, []);
+
+      useEffect(() => {
+        if (editorInstance && currentFile) {
+          editorInstance.setValue(files[currentFile]);
+        }
+      }, [currentFile, editorInstance]);
+
+      return React.createElement("div", { style:{ display:"flex", height:"100%" } },
+        React.createElement("div", { id:"sidebar" },
+          React.createElement("button", { onClick:startContainer }, "Start WebContainer"),
+          React.createElement("button", { onClick:createFile }, "New File"),
+          React.createElement("ul", null,
+            Object.keys(files).map(name =>
+              React.createElement("li", { key:name },
+                React.createElement("span", { style:{ fontWeight:currentFile===name?"bold":"normal", cursor:"pointer" }, onClick:()=>setCurrentFile(name) }, name),
+                React.createElement("button", { onClick:()=>deleteFile(name) }, "X"),
+                React.createElement("button", { onClick:()=>renameFile(name) }, "Rename")
+              )
+            )
+          )
+        ),
+        React.createElement("div", { id:"editor-preview", style:{ flex:1, display:"flex", flexDirection:"column" } },
+          React.createElement("div", { id:"editor", style:{ flex:1 } }),
+          previewUrl && React.createElement("iframe", { src:previewUrl, title:"Preview" })
+        )
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(React.createElement(App));
+  </script>
+</body>
+</html>
